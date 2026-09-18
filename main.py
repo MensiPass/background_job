@@ -35,11 +35,17 @@ async def say_hello(ctx: inngest.Context):
 
     return "Hello from the background!"
 
+async def handle_report_failure(ctx: inngest.Context):
+    report_id = ctx.event.data["event"]["data"]["report_id"]
+    reports[report_id]["status"] = "failed"
+
 @inngest_client.create_function(
     fn_id="make-report",
     trigger=inngest.TriggerEvent(
         event="report/requested"
-    )
+    ),
+    retries=2,
+    on_failure=handle_report_failure,
 )
 async def make_report(ctx: inngest.Context):
     report_id = ctx.event.data["report_id"]
@@ -49,10 +55,19 @@ async def make_report(ctx: inngest.Context):
         8000
     )
 
-    reports[report_id]["status"] = "done"
-    reports[report_id]["result"] = (
-        f"Report generated for {reports[report_id]['topic']}"
+    async def build_report():
+        if reports[report_id]["topic"] == "fail":
+            raise Exception("Report generation failed")
+
+        return f"Report generated for {reports[report_id]['topic']}"
+
+    result = await ctx.step.run(
+        "build-report",
+        build_report
     )
+
+    reports[report_id]["status"] = "done"
+    reports[report_id]["result"] = result
 
     return reports[report_id]
 
