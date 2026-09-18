@@ -1,4 +1,5 @@
-from fastapi import FastAPI,HTTPException
+
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import uuid
 import inngest
@@ -35,9 +36,11 @@ async def say_hello(ctx: inngest.Context):
 
     return "Hello from the background!"
 
+
 async def handle_report_failure(ctx: inngest.Context):
     report_id = ctx.event.data["event"]["data"]["report_id"]
     reports[report_id]["status"] = "failed"
+
 
 @inngest_client.create_function(
     fn_id="make-report",
@@ -71,6 +74,39 @@ async def make_report(ctx: inngest.Context):
 
     return reports[report_id]
 
+
+@inngest_client.create_function(
+    fn_id="heartbeat",
+    trigger=inngest.TriggerCron(
+        cron="* * * * *"
+    ),
+)
+async def heartbeat(ctx: inngest.Context):
+    pending = sum(
+        1
+        for report in reports.values()
+        if report["status"] == "pending"
+    )
+
+    done = sum(
+        1
+        for report in reports.values()
+        if report["status"] == "done"
+    )
+
+    failed = sum(
+        1
+        for report in reports.values()
+        if report["status"] == "failed"
+    )
+
+    print(
+        f"HEARTBEAT: pending={pending}, "
+        f"done={done}, "
+        f"failed={failed}"
+    )
+
+
 @app.post("/reports", status_code=202)
 async def create_report(request: ReportRequest):
     report_id = str(uuid.uuid4())
@@ -94,6 +130,7 @@ async def create_report(request: ReportRequest):
         "status": "pending"
     }
 
+
 @app.get("/reports/{report_id}")
 async def get_report(report_id: str):
     if report_id not in reports:
@@ -104,10 +141,11 @@ async def get_report(report_id: str):
 
     return reports[report_id]
 
+
 inngest.fast_api.serve(
     app,
     inngest_client,
-    [say_hello, make_report],
+    [say_hello, make_report, heartbeat],
     serve_path="/api/inngest",
     enable_unauthed_sync=True
 )
@@ -116,3 +154,4 @@ inngest.fast_api.serve(
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
